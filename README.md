@@ -45,18 +45,30 @@ sample1,lib1,/path/to/sample1_R1.fastq.gz,/path/to/sample1_R2.fastq.gz
 ```
 ## Example Command
 
-Run the pipeline as follows:
+Run the pipeline as follows (when running on interactive node such as cm4_inter in LRZ linux cluster):
 
 ```bash
 nextflow run assemble_ancient_mtDNA/ \
 --input sample_fastq.2.csv \
---fasta ../references/capra_hircus/bwa_index/mtDNA_15.fa \
+--fasta ../references/mtDNA_15.fa \
 --outdir $SCRATCH/goat/ancient_samples/screening_run \
--profile flux_mamba \
+-profile lrz_cm4_inter \
 -resume \
 --circle_nbp 15 \
 -w $SCRATCH
 ```
+
+- **important notes** when running on HPC with multiple clusters such as LRZ linux cluster the default partition is "serial_std". Therefore, first, type the following in your environment:
+
+```bash
+export SLURM_CLUSTERS=serial
+```
+then, run the following command:
+
+```bash
+nextflow run snsb-assemble_mtdna/ --input round2.csv --fasta mtDNA_15.fa --outdir $SCRATCH/goat/run_2/ -profile lrz_serial_std,mamba -resume --circle_nbp 15 -w $SCRATCH -qs 8
+```
+
 
 ## References
 - Apeltzer, M. [CircularMapper](https://github.com/apeltzer/CircularMapper)
