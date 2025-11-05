@@ -77,20 +77,20 @@ workflow PIPELINE_INITIALISATION {
         .map {
             meta, libr, fastq_1, fastq_2 ->
                 if (!fastq_2) {
-                    return [ meta.id, meta + [lib: libr, single_end:true ], fastq_1  ]
+                    return [ meta + [lib: libr, single_end:true] , fastq_1  ]
                 } else {
-                    return [ meta.id, meta + [lib: libr, single_end:false ], fastq_1, fastq_2  ]
+                    return [ meta + [lib: libr, single_end:false] , fastq_1, fastq_2  ]
                 }
         }
-        .groupTuple()
+        //.groupTuple()
         //.view()
-        .map { samplesheet ->
-            validateInputSamplesheet(samplesheet)
-        }
-        .map {
-            meta, fastqs ->
-                return [ meta, fastqs.flatten() ]
-        }
+        //.map { samplesheet ->
+        //    validateInputSamplesheet(samplesheet)
+        //}
+        //.map {
+        //    meta, fastqs ->
+        //        return [ meta, fastqs.flatten() ]
+        //}
         .set { ch_samplesheet }
 
     emit:
