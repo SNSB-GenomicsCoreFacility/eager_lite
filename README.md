@@ -40,8 +40,9 @@ Ensure the following tools are available in your environment or installed via yo
   A CSV file containing paths to the paired-end FASTQ files. Example:
 
 ```bash
-sample,lib,fastq1,fastq2
-sample1,lib1,/path/to/sample1_R1.fastq.gz,/path/to/sample1_R2.fastq.gz
+sample,lib,udg_treated,fastq1,fastq2
+sample1,lib1,true,/path/to/sample1_R1.fastq.gz,/path/to/sample1_R2.fastq.gz
+sample1,lib2,false,/path/to/sample1_R1.fastq.gz,none
 ```
 ## Example Command
 
@@ -50,11 +51,11 @@ Run the pipeline as follows (when running on interactive node such as cm4_inter 
 ```bash
 nextflow run assemble_ancient_mtDNA/ \
 --input sample_fastq.2.csv \
---fasta ../references/mtDNA_15.fa \
+--fasta ../references/capra_hircus/genome.fa \
+--bwa_idx ../references/capra_hircus/bwa_idx/
 --outdir $SCRATCH/goat/ancient_samples/screening_run \
--profile lrz_cm4_inter \
+-profile lrz_serial_std,mamba \
 -resume \
---circle_nbp 15 \
 -w $SCRATCH
 ```
 
@@ -63,11 +64,7 @@ nextflow run assemble_ancient_mtDNA/ \
 ```bash
 export SLURM_CLUSTERS=serial
 ```
-then, run the following command:
-
-```bash
-nextflow run snsb-assemble_mtdna/ --input round2.csv --fasta mtDNA_15.fa --outdir $SCRATCH/goat/run_2/ -profile lrz_serial_std,mamba -resume --circle_nbp 15 -w $SCRATCH -qs 8
-```
+then, run the above-mentioned command.
 
 
 ## References
