@@ -5,3 +5,4 @@ channels:
   - bioconda
 dependencies:
   - bioconda::qualimap
+  - bioconda/label/cf201901::bioconductor-genomeinfodbdata
