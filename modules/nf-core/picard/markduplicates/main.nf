@@ -24,7 +24,7 @@ process PICARD_MARKDUPLICATES {
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}_${meta.lib}_markdup"
+    def prefix = task.ext.prefix ?: "${meta.id}_markdup"
     def suffix = task.ext.suffix    ?: "${reads.getExtension()}"
     def reference = fasta ? "--REFERENCE_SEQUENCE ${fasta}" : ""
     def avail_mem = 3072

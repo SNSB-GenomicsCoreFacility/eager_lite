@@ -21,7 +21,9 @@ process BWA_ALN {
 
     script:
     def args   = task.ext.args   ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}_${meta.lib}"
+    def first_read = reads[0].getName()
+    def regex_suffix = /(".truncated.gz"|".fq.gz")$/
+    def prefix = first_read.replaceAll(regex_suffix, '')
     def sample = "${meta.id}"
     def lib = "${meta.lib}"
 
@@ -33,7 +35,7 @@ process BWA_ALN {
         \${INDEX} ${reads}|bwa samse \\
         -r "@RG\\tID:${sample}_${lib}\\tSM:${sample}\\tPL:illumina" \\
         \${INDEX} - ${reads}|samtools sort --write-index \\
-        -@ ${task.cpus} - -o ${sample}_${lib}.sorted.bam##idx##${sample}_${lib}.sorted.bam.bai
+        -@ ${task.cpus} - -o ${prefix}.sorted.bam##idx##${prefix}.sorted.bam.bai
 
 
     cat <<-END_VERSIONS > versions.yml
