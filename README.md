@@ -1,79 +1,145 @@
-# Ancient mtDNA Assembly Pipeline (Circularized Reference Approach)
+# eager-lite
 
-## Overview
+`eager-lite` is a lightweight **Nextflow pipeline** (based on nf-core/eager) designed for aligning **ancient DNA (aDNA)** sequencing data to a reference genome using **`bwa aln`** with parameters recommended for ancient samples.  
+The pipeline is optimized for **large FASTQ files**, which are automatically split into smaller chunks prior to alignment to improve performance and scalability.
 
-This **Nextflow** pipeline performs **mitochondrial DNA (mtDNA) assembly** from sequencing data of ancient samples using a **circularized reference approach**.  
-It is designed to generate consensus sequences of mtDNA by circularizing the reference genome, aligning reads, and assembling using ANGSD-based consensus methods optimized for ancient DNA.
+This workflow assumes that all sequencing libraries are **UDG-treated**.
 
-## Workflow Summary
+---
 
-1. **Adapter Removal**
-   - Raw sequencing reads are cleaned using the **AdapterRemoval** module.
-   - This module is **directly copied and modified** from the [nf-core/eager](https://github.com/nf-core/eager) pipeline to ensure compatibility with ancient DNA data and consistency in preprocessing.
+## Features
 
-2. **Reference Circularization**
-   - The pipeline creates a **circularized reference** genome based on a user-provided number of base pairs (`--circle_nbp`).
-   - This is achieved by appending and prepending the specified number of bases to simulate the circular nature of mtDNA.
+- Adapter removal for single-end and paired-end reads  
+- Automatic FASTQ chunking for large files  
+- Alignment using `bwa aln` with ancient DNA–recommended settings  
+- Library-level and sample-level BAM merging  
+- Post-alignment filtering  
+- PCR duplicate removal using **Picard** or **dedup**  
+- Supports mixed single-end and paired-end libraries  
+- Scalable and reproducible via **Nextflow**
 
-3. **Read Alignment**
-   - The circularized reference is indexed and used to align the sequencing reads with **BWA aln**, optimized for ancient DNA reads.
+---
 
-4. **Realignment of Decircularized Reference**
-   - The aligned reads are processed using the **`realignsamfile`** tool from [CircularMapper](https://github.com/apeltzer/CircularMapper).
-   - This step generates a BAM file corresponding to the **de-circularized** reference.
+## Pipeline Overview
 
-5. **Consensus Sequence Generation**
-   - **ANGSD** is used to generate consensus sequences from the aligned BAM files.
-   - The ANGSD settings follow the recommendations from the study:  
-     [*A worldwide expansion of domesticated goats inferred from ancient DNA*](https://www.pnas.org/doi/10.1073/pnas.2100901118).
+The pipeline consists of the following major steps:
 
-## Dependencies
+1. **Adapter Removal**  
+   Sequencing adapters are removed from FASTQ files.
 
-Ensure the following tools are available in your environment or installed via your Nextflow profile:
+2. **FASTQ Splitting**  
+   Large FASTQ files are split into smaller chunks to allow parallel alignment.
 
-- [Nextflow](https://www.nextflow.io/) v 25.04
-- conda/mamba
+3. **Alignment (bwa aln)**  
+   Each FASTQ chunk is aligned independently to the reference genome using `bwa aln` with settings optimized for ancient DNA.
 
-## Input Requirements
+4. **Merge Alignments by Library**  
+   Chunk-level BAM files are merged per library.
 
-- **FASTQ file list:**  
-  A CSV file containing paths to the paired-end FASTQ files. Example:
+5. **Merge Alignments by Sample**  
+   Library-level BAM files are merged into a final sample-level BAM.
+
+6. **Post-alignment Filtering**  
+   BAM files are filtered based on mapping quality and alignment criteria.
+
+7. **Deduplication**  
+   PCR duplicates are removed using either:
+   - `Picard MarkDuplicates`, or  
+   - `dedup`
+
+---
+
+## Assumptions
+
+- All libraries are **UDG-treated**
+- Input data consists of ancient DNA FASTQ files
+- Reference genome is indexed for `bwa aln`
+
+---
+
+## Input File Format
+
+The pipeline requires a **comma-separated sample sheet** with the following columns:
 
 ```bash
-sample,lib,udg_treated,fastq1,fastq2
-sample1,lib1,true,/path/to/sample1_R1.fastq.gz,/path/to/sample1_R2.fastq.gz
-sample1,lib2,false,/path/to/sample1_R1.fastq.gz,none
+sample,lib,udg_treated,fastq_1,fastq_2
+SG24_M,lib1,true,/data/ancient/goat/SG24_M/read1_lib1.fastq.gz,/data/ancient/goat/SG24_M/read2_lib1.fastq.gz
+SG24_M,lib2,true,/data/ancient/goat/SG24_M/read1_lib2.fastq.gz,none
+SG2_C,lib1,true,/data/ancient/goat/SG2_C/SG2C_lib1.fastq.gz,none
 ```
-## Example Command
 
-Run the pipeline as follows (when running on interactive node such as cm4_inter in LRZ linux cluster):
+---
+
+## Running the Pipeline
+
+The `eager-lite` pipeline is executed using **Nextflow** (v >25.0). At minimum, you must provide a sample sheet, a reference genome, and an output directory.
+
+### Basic Usage
 
 ```bash
-nextflow run assemble_ancient_mtDNA/ \
---input sample_fastq.2.csv \
---fasta ../references/capra_hircus/genome.fa \
---bwa_idx ../references/capra_hircus/bwa_idx/
---outdir $SCRATCH/goat/ancient_samples/screening_run \
--profile lrz_serial_std,mamba \
--resume \
--w $SCRATCH
+nextflow run eager-lite \
+  --input samplesheet.csv \
+  --reference reference.fasta \
+  --outdir results
+  -profile mamba
+  -qs 2
+  -resume
 ```
 
-- **important notes** when running on HPC with multiple clusters such as LRZ linux cluster the default partition is "serial_std". Therefore, first, type the following in your environment:
+---
 
-```bash
-export SLURM_CLUSTERS=serial
+## Output Directory Structure
+
+The `eager-lite` pipeline generates the following directory structure inside the specified output directory:
+
+```text
+.
+├── adapterremoval
+├── bwa
+├── dedupflagstat
+├── endorspy
+├── fastqc
+├── filteredflagstat
+├── mergelib
+├── picard
+├── pipeline_info
+├── rawflagstat
+├── samtools
+├── seqkit
+└── sortmergedlib
+
 ```
-then, run the above-mentioned command.
 
+| Directory | Description |
+|-----------|-------------|
+| `adapterremoval` | Adapter-trimmed FASTQ files generated during preprocessing |
+| `bwa` | BAM files produced by `bwa aln`, including chunk-level alignments |
+| `mergelib` | BAM files merged at the library level from chunk-level alignments |
+| `sortmergedlib` | Sorted library-level BAM files prior to sample-level merging |
+| `samtools` | Sample-level merged BAM files and intermediate samtools outputs |
+| `rawflagstat` | `samtools flagstat` reports for raw (unfiltered) BAM files |
+| `filteredflagstat` | `samtools flagstat` reports after post-alignment filtering |
+| `picard` | Deduplicated BAM files generated using Picard (when selected) |
+| `dedupflagstat` | `samtools flagstat` reports for deduplicated BAM files |
+| `fastqc` | FASTQC quality control reports for input and processed FASTQ files |
+| `seqkit` | FASTQ chunking statistics and intermediate chunk files |
+| `endorspy` | Endogenous DNA content estimation results |
+| `pipeline_info` | Nextflow execution metadata, logs, reports, and software versions |
+
+---
 
 ## References
-- Apeltzer, M. [CircularMapper](https://github.com/apeltzer/CircularMapper)
-- [nf-core/eager](https://nf-co.re/eager/2.5.2/)
-- Daly, K. G. et al. (2021). A worldwide expansion of domesticated goats inferred from ancient DNA.
-Proceedings of the National Academy of Sciences (PNAS), 118(20): e2100901118.
-DOI: 10.1073/pnas.2100901118
+
+- Apeltzer, M. **CircularMapper**
+- **nf-core/eager**
+- Daly, K. G. *et al.* (2021).  
+  **A worldwide expansion of domesticated goats inferred from ancient DNA.**  
+  *Proceedings of the National Academy of Sciences (PNAS)*, 118(20): e2100901118.  
+  DOI: 10.1073/pnas.2100901118
+
+---
 
 ## Acknowledgements
-- The AdapterRemoval module used in this pipeline is copied and modified from the nf-core/eager
-- Special thanks to the nf-core community for providing high-quality, open-source modules and pipelines that enable reproducible bioinformatics workflows.
+
+- The AdapterRemoval module used in this pipeline is copied and modified from **nf-core/eager**.
+- Special thanks to the **nf-core community** for providing high-quality, open-source modules and pipelines that enable reproducible bioinformatics workflows.
