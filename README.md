@@ -77,9 +77,9 @@ The `eager-lite` pipeline is executed using **Nextflow** (v >25.0). At minimum, 
 ### Basic Usage
 
 ```bash
-nextflow run eager-lite \
+nextflow run eager_lite \
   --input samplesheet.csv \
-  --reference reference.fasta \
+  --fasta reference.fasta \
   --outdir results
   -profile mamba
   -qs 2
