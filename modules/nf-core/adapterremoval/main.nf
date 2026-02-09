@@ -18,7 +18,7 @@ process ADAPTERREMOVAL {
     tuple val(meta), path("${prefix}.collapsed.fastq.gz")          , emit: collapsed          , optional: true
     tuple val(meta), path("${prefix}.collapsed.truncated.fastq.gz"), emit: collapsed_truncated, optional: true
     tuple val(meta), path("${prefix}.paired.fastq.gz")             , emit: paired_interleaved , optional: true
-    tuple val(meta), path('*.settings')                            , emit: settings
+    tuple val(meta), path('*.settings')                            , emit: settings_f
     path "versions.yml"                                            , emit: versions
 
     when:

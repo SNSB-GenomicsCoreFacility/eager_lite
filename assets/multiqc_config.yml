@@ -9,6 +9,27 @@ report_section_order:
   "snsb-assemble_mtdna-summary":
     order: -1002
 
+custom_data:
+  mapq_hist:
+    file_format: "tsv"
+    section_name: "MAPQ distribution"
+    description: "Mapping qualities for reads"
+    plot_type: "linegraph"
+    xlab: "MAPQ"
+    ylab: "Reads"
+
+sp:
+  mapq_hist:
+    fn: "*mapq_hist.tsv"
+
+general_stats_columns:
+  samtools/stats:
+    columns:
+      reads_mapped_percent:
+        title: "% Mapped"
+        description: "% Mapped reads from samtools stats"
+        hidden: true
+
 export_plots: true
 
 disable_version_detection: true

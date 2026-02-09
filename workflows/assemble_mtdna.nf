@@ -11,8 +11,8 @@ include { SEQKIT_SPLIT2          } from '../modules/nf-core/seqkit/split2/main'
 include { DEDUP                  } from '../modules/nf-core/dedup/main'
 include { SAMTOOLS_VIEW          } from '../modules/nf-core/samtools/view/main'
 include { SAMTOOLS_FLAGSTAT as RAWFLAGSTAT } from '../modules/nf-core/samtools/flagstat'
-include { SAMTOOLS_FLAGSTAT as FILTEREDFLAGSTAT } from '../modules/nf-core/samtools/flagstat'
-include { SAMTOOLS_FLAGSTAT as DEDUPFLAGSTAT } from '../modules/nf-core/samtools/flagstat'
+include { SAMTOOLS_FLAGSTAT as FILTSAMPLEFLAGSTAT } from '../modules/nf-core/samtools/flagstat'
+include { SAMTOOLS_FLAGSTAT as FILTDEDUPSAMPLEFLAGSTAT } from '../modules/nf-core/samtools/flagstat'
 include { PICARD_MARKDUPLICATES  } from '../modules/nf-core/picard/markduplicates/main'
 include { ANGSD_DOCOUNTS         } from '../modules/local/angsd/docounts/main'
 include { BWA_ALN                } from '../modules/local/bwa/aln/main'
@@ -20,14 +20,20 @@ include { BWA_INDEX              } from '../modules/nf-core/bwa/index/main'
 include { BWA_MEM                } from '../modules/nf-core/bwa/mem/main'
 include { BAMUTIL_TRIMBAM        } from '../modules/nf-core/bamutil/trimbam/main'
 include { SAMTOOLS_MERGE as MERGELIB_SAMTOOLS         } from '../modules/nf-core/samtools/merge/main'
-include { SAMTOOLS_MERGE as MERGESAMPLE_SAMTOOLS         } from '../modules/nf-core/samtools/merge/main'
+include { SAMTOOLS_MERGE as MERGERAWSAMPLE_SAMTOOLS         } from '../modules/nf-core/samtools/merge/main'
+include { SAMTOOLS_MERGE as MERGEFILTSAMPLE_SAMTOOLS         } from '../modules/nf-core/samtools/merge/main'
+include { SAMTOOLS_MERGE as MERGEFILTDEDUPSAMPLE_SAMTOOLS         } from '../modules/nf-core/samtools/merge/main'
 include { SAMTOOLS_DEPTH         } from '../modules/nf-core/samtools/depth/main'
 include { SAMTOOLS_SORT as SORTMERGEDLIB_SAMTOOLS          } from '../modules/nf-core/samtools/sort/main'
-include { SAMTOOLS_SORT as SORTMERGEDSAMPLE_SAMTOOLS          } from '../modules/nf-core/samtools/sort/main'
+include { SAMTOOLS_SORT as SORTMERGEDRAWSAMPLE_SAMTOOLS          } from '../modules/nf-core/samtools/sort/main'
+include { SAMTOOLS_SORT as SORTMERGEDFILTSAMPLE_SAMTOOLS          } from '../modules/nf-core/samtools/sort/main'
 include { SAMTOOLS_SORT as SORTDEDUP_SAMTOOLS          } from '../modules/nf-core/samtools/sort/main'
+include { SAMTOOLS_STATS         } from "../modules/nf-core/samtools/stats/main"
 include { ENDORSPY               } from "../modules/nf-core/endorspy/main"
-include { QUALIMAP_BAMQC         } from '../modules/nf-core/qualimap/bamqc/main'
+include { QUALIMAP_BAMQC         } from "../modules/nf-core/qualimap/bamqc/main"
+include { DAMAGEPROFILER         } from "../modules/nf-core/damageprofiler/main"
 include { AWK_REPORT_DOFASTA     } from '../modules/local/awk/report_dofasta/main'
+include { AWK_SAMTOOLS_STATS_PARSE_MQ } from "../modules/local/awk/samtools_stats_parse_mq/main"
 include { MULTIQC                } from '../modules/nf-core/multiqc/main'
 include { paramsSummaryMap       } from 'plugin/nf-schema'
 include { paramsSummaryMultiqc   } from '../subworkflows/nf-core/utils_nfcore_pipeline'
@@ -59,6 +65,8 @@ workflow ASSEMBLE_MTDNA {
             ADAPTERREMOVAL(
                 ch_samplesheet
             )
+
+            ch_multiqc_files = ch_multiqc_files.mix(ADAPTERREMOVAL.out.logs.collect{it[1]})
             reads = ADAPTERREMOVAL.out.read1
         }
     else{
@@ -148,7 +156,251 @@ workflow ASSEMBLE_MTDNA {
         Channel.value("bai")
     )
 
+    bwa_aln_single_lib = br_grp_bwa_aln_out.singles.map{meta, bam -> 
+        def new_meta = meta + [id:"${meta.id}.${meta.lib}"]
+        tuple(new_meta, bam[0])
+    }
 
+    ch_samtools_filter = SORTMERGEDLIB_SAMTOOLS.out.bam.mix(bwa_aln_single_lib)
+                        ch_mergerawsample = ch_samtools_filter.map{meta, bam -> 
+                                def new_meta = [id:meta.id.replaceAll(/\.${meta.lib}.*/,"")]
+                                tuple(new_meta, bam)
+                                }.groupTuple()
+
+                        //
+                        //MODULE: MERGERAWSAMPLE_SAMTOOLS
+                        //
+                        MERGERAWSAMPLE_SAMTOOLS(
+                            ch_mergerawsample,
+                            [[],[]],
+                            [[],[]],
+                            [[],[]]
+                        )
+                        //
+                        //MODULE: SORTMERGEDRAWSAMPLE_SAMTOOLS
+                        //
+                        SORTMERGEDRAWSAMPLE_SAMTOOLS(
+                            MERGERAWSAMPLE_SAMTOOLS.out.bam.map{meta, bam -> 
+                                def new_meta = meta + [id:"${meta.id}.raw.sorted"]
+                                tuple(new_meta, bam)}.groupTuple(),
+                            [[],[]],
+                            Channel.value("bai")
+                        )
+                        // 
+                        // RAW_SAMPLES_FLAGSTAT
+                        //
+
+                        RAWFLAGSTAT(
+                          SORTMERGEDRAWSAMPLE_SAMTOOLS.out.bam.map{meta, bam -> tuple(meta, bam, [])} 
+                        )
+
+                        ch_raw_endorspy = RAWFLAGSTAT.out.flagstat.map{meta, stat ->
+                            def new_meta = [id:meta.id.replaceAll(".raw.sorted","")]
+                            tuple(new_meta, stat)
+                        }
+
+    ///first filter the aligned bam files for each library separately
+    //
+    //MODULE: SAMTOOLS_VIEW
+    //
+    SAMTOOLS_VIEW(
+        ch_samtools_filter.map{meta, bam -> 
+            def new_meta = meta + [id:"${meta.id}.filt"]
+            tuple(new_meta,bam,[])},
+        [[],[]],
+        [],
+        Channel.value("bai")
+    )
+                
+                        //
+                        //MODULE: MERGEFILTSAMPLE_SAMTOOLS
+                        //
+                        MERGEFILTSAMPLE_SAMTOOLS(
+                            SAMTOOLS_VIEW.out.bam.map{meta, bam -> 
+                                def new_meta = [id:meta.id.replaceAll(/\.${meta.lib}.*/,"")]
+                                tuple(new_meta, bam)
+                                }.groupTuple(),
+                            [[],[]],
+                            [[],[]],
+                            [[],[]]
+                        )
+                        //
+                        //MODULE: SORTMERGEDFILTSAMPLE_SAMTOOLS
+                        //
+                        SORTMERGEDFILTSAMPLE_SAMTOOLS(
+                            MERGEFILTSAMPLE_SAMTOOLS.out.bam.map{meta, bam -> 
+                                def new_meta = meta + [id:"${meta.id}.filt.sorted"]
+                                tuple(new_meta, bam)}.groupTuple(),
+                            [[],[]],
+                            Channel.value("bai")
+                        )
+                        // 
+                        //MODULE: FILTSAMPLEFLAGSTAT
+                        //
+
+                        FILTSAMPLEFLAGSTAT(
+                          SORTMERGEDFILTSAMPLE_SAMTOOLS.out.bam.map{meta, bam -> tuple(meta, bam, [])} 
+                        )
+                        
+                        ch_filt_endorspy = FILTSAMPLEFLAGSTAT.out.flagstat.map{meta, stat ->
+                            def new_meta = [id:meta.id.replaceAll(".filt.sorted","")]
+                            tuple(new_meta, stat)
+                        }
+
+
+    ch_dedup = SAMTOOLS_VIEW.out.bam
+
+    if (params.dedup_tool == "picard" ){
+            PICARD_MARKDUPLICATES(
+                ch_dedup,
+                [[],[]],
+                [[],[]]
+            )
+
+        ch_multiqc_files = ch_multiqc_files.mix(PICARD_MARKDUPLICATES.out.metrics.collect{it[1]})
+        ch_dedup_flagstat = PICARD_MARKDUPLICATES.out.bam
+
+        }
+    if (params.dedup_tool == "dedup" ){
+            DEDUP(
+                ch_dedup
+            )
+            ch_multiqc_files = ch_multiqc_files.mix(DEDUP.out.json.collect{it[1]})
+            ///
+            /// MODULE: SORT_DEDUP
+            ///
+            SORTDEDUP_SAMTOOLS(
+                DEDUP.out.bam.map{meta, bam -> 
+                    def new_meta = meta + [id:"${meta.id}.sorted"]
+                    tuple(new_meta, bam)},
+                [[],[]],
+                Channel.value("bai")
+            )
+        ch_dedup_flagstat = SORTDEDUP_SAMTOOLS.out.bam
+        }
+
+    // MODULE: BAMUTIL_TRIMBAM
+    //
+    //
+    ch_pre_bamtrim = ch_dedup_flagstat.branch{meta, bam -> 
+                udg: meta.udg == true
+                non_udg: meta.udg == false
+        }
+
+    ch_bamtrim = ch_pre_bamtrim.non_udg.combine([params.trim_left]).combine([params.trim_right])
+
+    BAMUTIL_TRIMBAM(
+        ch_bamtrim.map{meta, bam, rtrim, ltrim ->
+            def new_meta = meta + [id:"${meta.id}.non_udg"]
+            tuple(new_meta,bam, rtrim, ltrim)
+            }
+        )
+
+    ch_udg_bam = ch_pre_bamtrim.udg.map{meta, bam -> 
+        def new_meta = meta + [id:"${meta.id}.udg"]
+        tuple(new_meta, bam)
+        }
+
+    
+
+    ch_merged_sample = BAMUTIL_TRIMBAM.out.bam.mix(ch_udg_bam).map{meta, bam ->
+                                def new_meta = [id:meta.id.replaceAll(/\.${meta.lib}.*/,"")]
+                                tuple(new_meta, bam)
+    }.groupTuple()
+
+    //
+    // MODULE: MERGEFILTDEDUPSAMPLE_SAMTOOLS
+    //
+
+    MERGEFILTDEDUPSAMPLE_SAMTOOLS(
+        ch_merged_sample.map{meta, bam -> 
+            def new_meta = meta + [id:"${meta.id}.final.merged"]
+            tuple(new_meta, bam)
+            },
+        [[],[]],
+        [[],[]],
+        [[],[]]
+    )
+
+    //
+    // MODULE: SAMTOOLS_DEPTH
+    //
+    SAMTOOLS_DEPTH(
+        MERGEFILTDEDUPSAMPLE_SAMTOOLS.out.bam,
+        [[],[]]
+    )
+
+    // MODULE: DAMAGEPROFILER
+    //
+    //
+    DAMAGEPROFILER(
+        MERGEFILTDEDUPSAMPLE_SAMTOOLS.out.bam,
+        [],
+        [],
+        []
+    )
+        ch_multiqc_files = ch_multiqc_files.mix(DAMAGEPROFILER.out.results.collect{it[1]})
+                    
+                        //
+                        //MODULE: FILTDEDUPSAMPLEFLAGSTAT
+                        //
+
+                        FILTDEDUPSAMPLEFLAGSTAT(
+                          MERGEFILTDEDUPSAMPLE_SAMTOOLS.out.bam.map{meta, bam -> tuple(meta, bam, [])} 
+                        )
+
+                        ch_filt_dedup_endorspy = FILTDEDUPSAMPLEFLAGSTAT.out.flagstat.map{meta, stat ->
+                            def new_meta = [id:meta.id.replaceAll(".final.merged","")]
+                            tuple(new_meta, stat)
+                        }
+    //
+    //QUALIMAP_BAMQC
+    //
+    QUALIMAP_BAMQC(
+        MERGEFILTDEDUPSAMPLE_SAMTOOLS.out.bam.map{meta, bam->
+            def new_meta = [id:meta.id.replaceAll(".final.merged","")]
+            tuple(new_meta,bam)
+            },
+        []
+    )
+        ch_multiqc_files = ch_multiqc_files.mix(QUALIMAP_BAMQC.out.results.collect{it[1]})
+
+    //
+    // MODULE: SAMTOOLS_STATS
+    //
+    SAMTOOLS_STATS(
+        MERGEFILTDEDUPSAMPLE_SAMTOOLS.out.bam.map{meta, bam->
+            def new_meta = [id:meta.id.replaceAll(".final.merged","")]
+            tuple(new_meta,bam,[])
+            },
+        [[],[]]
+    )
+
+        ch_multiqc_files = ch_multiqc_files.mix(SAMTOOLS_STATS.out.stats.collect{it[1]})
+
+    //
+    // MODULE: AWK_PARSE_SAMTOOLS_STATS_MQ
+    //
+    AWK_SAMTOOLS_STATS_PARSE_MQ(
+        SAMTOOLS_STATS.out.stats
+    )
+
+    ch_multiqc_files = ch_multiqc_files.mix(AWK_SAMTOOLS_STATS_PARSE_MQ.out.mapq_hist.collect{it[1]})
+    //ch_raw_endorspy.view()
+    //ch_filt_endorspy.view()
+    //ch_filt_dedup_endorspy.view()
+    //
+    //MODULE: ENDORSPY
+    //
+    ENDORSPY(
+        ch_raw_endorspy.combine(ch_filt_endorspy, by:0).combine(ch_filt_dedup_endorspy,by:0)
+    )
+    
+    ch_multiqc_files = ch_multiqc_files.mix(ENDORSPY.out.json.collect{it[1]})
+    /////
+    /////
+    /////
+    /*
     ch_combined_raw_bam =  SORTMERGEDLIB_SAMTOOLS.out.bam.map { meta, bam ->
                 def cleaned_id = meta.id.replaceFirst("\\.${meta.lib}\\.merged\\.sorted\$", "")
                 def new_meta =  meta + [ id: cleaned_id ]
@@ -217,15 +469,6 @@ workflow ASSEMBLE_MTDNA {
             RAWFLAGSTAT(
               ch_raw_sample_flagstat.map{meta, bam -> tuple(meta, bam, [])} 
             )
-            //
-            //MODULE: SAMTOOLS_VIEW
-            //
-            SAMTOOLS_VIEW(
-                ch_raw_sample_flagstat.map{meta, bam -> tuple(meta,bam,[])},
-                [[],[]],
-                [],
-                Channel.value("bai")
-            )
 
             //
             // MODULE: FILTERED_FLAGSTAT
@@ -233,35 +476,7 @@ workflow ASSEMBLE_MTDNA {
             FILTEREDFLAGSTAT(
                 SAMTOOLS_VIEW.out.bam.map{meta, bam -> tuple(meta, bam, [])}
             )
-            SAMTOOLS_VIEW.out.bam.view()
 
-            if (params.dedup_tool == "picard" ){
-                    PICARD_MARKDUPLICATES(
-                        SAMTOOLS_VIEW.out.bam,
-                        [[],[]],
-                        [[],[]]
-                    )
-
-                ch_multiqc_files = ch_multiqc_files.mix(PICARD_MARKDUPLICATES.out.metrics.collect{it[1]})
-
-                }
-                ch_dedup_flagstat = PICARD_MARKDUPLICATES.out.bam
-            if (params.dedup_tool == "dedup" ){
-                    DEDUP(
-                        SAMTOOLS_VIEW.out.bam
-                    )
-                    ///
-                    /// MODULE: SORT_DEDUP
-                    ///
-                    SORTDEDUP_SAMTOOLS(
-                        DEDUP.out.bam.map{meta, bam -> 
-                            def new_meta = meta + [id:"${meta.id}.sorted"]
-                            tuple(new_meta, bam)}.groupTuple(),
-                        [[],[]],
-                        Channel.value("bai")
-                    )
-                ch_dedup_flagstat = SORTDEDUP_SAMTOOLS.out.bam
-                }
             ///
             /// MODULE: DEDUPFLAGSTAT
             ///
@@ -285,10 +500,6 @@ workflow ASSEMBLE_MTDNA {
                 [[],[]]
             )
 
-    /*
-    /////
-    /////
-    /////
     
     prepare_ch_dup = ch_combined_raw_bam.map{meta,bam -> tuple(meta, [bam])}.mix(br_grp_bwa_aln_out.singles)
 

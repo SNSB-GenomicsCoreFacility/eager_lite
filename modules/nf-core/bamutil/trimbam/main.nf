@@ -19,7 +19,7 @@ process BAMUTIL_TRIMBAM {
 
     script:
     def args = task.ext.args ?: ''
-    def prefix = task.ext.prefix ?: "${meta.id}_${meta.lib}_udg_trimmed"
+    def prefix = task.ext.prefix ?: "${meta.id}"
     """
     bam \\
         trimBam \\
