@@ -60,7 +60,6 @@ workflow ASSEMBLE_MTDNA {
 
     reference_fasta = Channel.fromPath(params.fasta)
     prech_reference_fasta = reference_fasta.map{fasta->tuple([id:"reference"],fasta)}
-    
     if(!params.skip_adapterremoval){
             ADAPTERREMOVAL(
                 ch_samplesheet
@@ -119,6 +118,8 @@ workflow ASSEMBLE_MTDNA {
 		m1_fa_m2_idx = fa.combine(meta_idx)
 	}
     prech_bwa_aln = split_reads.combine(m1_fa_m2_idx)
+
+    if(params.aligner == "bwa_aln"){
     //
     //MODULE:BWA_ALN
     //
@@ -130,6 +131,22 @@ workflow ASSEMBLE_MTDNA {
     //MODULE: SAMTOOLS_MERGE
     //
     grp_bwa_aln_out = BWA_ALN.out.bam.groupTuple()
+
+
+    }
+
+    if(params.aligner == "bwa_mem"){
+        
+    BWA_MEM(
+        prech_bwa_aln.map{meta, fastq, meta_f, fa, meta_i, idx -> tuple(meta, fastq)},
+        prech_bwa_aln.map{meta, fastq, meta_f, fa, meta_i, idx -> tuple(meta_i, idx)},
+        [[],[]],
+        Channel.value("sort")
+    )
+    grp_bwa_aln_out = BWA_MEM.out.bam.groupTuple()
+    }
+
+    grp_bwa_aln_out.view()
 
     br_grp_bwa_aln_out = grp_bwa_aln_out.branch { id, bams ->
         to_merge: bams.size() > 1 
@@ -279,8 +296,9 @@ workflow ASSEMBLE_MTDNA {
         ch_dedup_flagstat = SORTDEDUP_SAMTOOLS.out.bam
         }
 
-    // MODULE: BAMUTIL_TRIMBAM
+    if(params.trim_left > 0 || params.trim_right > 0){
     //
+    // MODULE: BAMUTIL_TRIMBAM
     //
     ch_pre_bamtrim = ch_dedup_flagstat.branch{meta, bam -> 
                 udg: meta.udg == true
@@ -307,6 +325,15 @@ workflow ASSEMBLE_MTDNA {
                                 def new_meta = [id:meta.id.replaceAll(/\.${meta.lib}.*/,"")]
                                 tuple(new_meta, bam)
     }.groupTuple()
+
+    }
+    else{
+        ch_merged_sample = ch_dedup_flagstat.map{meta, bam ->
+                                    def new_meta = [id:meta.id.replaceAll(/\.${meta.lib}.*/,"")]
+                                    tuple(new_meta, bam)
+        }.groupTuple()
+
+        }
 
     //
     // MODULE: MERGEFILTDEDUPSAMPLE_SAMTOOLS
