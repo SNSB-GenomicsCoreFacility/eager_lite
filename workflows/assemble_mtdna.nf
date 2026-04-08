@@ -31,6 +31,7 @@ include { SAMTOOLS_SORT as SORTDEDUP_SAMTOOLS          } from '../modules/nf-cor
 include { SAMTOOLS_STATS         } from "../modules/nf-core/samtools/stats/main"
 include { ENDORSPY               } from "../modules/nf-core/endorspy/main"
 include { QUALIMAP_BAMQC         } from "../modules/nf-core/qualimap/bamqc/main"
+include { QUALIMAP_BAMQC as MTDNA_BAMQC        } from "../modules/nf-core/qualimap/bamqc/main"
 include { DAMAGEPROFILER         } from "../modules/nf-core/damageprofiler/main"
 include { AWK_REPORT_DOFASTA     } from '../modules/local/awk/report_dofasta/main'
 include { AWK_SAMTOOLS_STATS_PARSE_MQ } from "../modules/local/awk/samtools_stats_parse_mq/main"
@@ -146,7 +147,6 @@ workflow ASSEMBLE_MTDNA {
     grp_bwa_aln_out = BWA_MEM.out.bam.groupTuple()
     }
 
-    grp_bwa_aln_out.view()
 
     br_grp_bwa_aln_out = grp_bwa_aln_out.branch { id, bams ->
         to_merge: bams.size() > 1 
@@ -183,37 +183,38 @@ workflow ASSEMBLE_MTDNA {
                                 def new_meta = [id:meta.id.replaceAll(/\.${meta.lib}.*/,"")]
                                 tuple(new_meta, bam)
                                 }.groupTuple()
+                        if(params.mtdna_consense == false){
+                            //
+                            //MODULE: MERGERAWSAMPLE_SAMTOOLS
+                            //
+                            MERGERAWSAMPLE_SAMTOOLS(
+                                ch_mergerawsample,
+                                [[],[]],
+                                [[],[]],
+                                [[],[]]
+                            )
+                            //
+                            //MODULE: SORTMERGEDRAWSAMPLE_SAMTOOLS
+                            //
+                            SORTMERGEDRAWSAMPLE_SAMTOOLS(
+                                MERGERAWSAMPLE_SAMTOOLS.out.bam.map{meta, bam -> 
+                                    def new_meta = meta + [id:"${meta.id}.raw.sorted"]
+                                    tuple(new_meta, bam)}.groupTuple(),
+                                [[],[]],
+                                Channel.value("bai")
+                            )
+                            // 
+                            // RAW_SAMPLES_FLAGSTAT
+                            //
 
-                        //
-                        //MODULE: MERGERAWSAMPLE_SAMTOOLS
-                        //
-                        MERGERAWSAMPLE_SAMTOOLS(
-                            ch_mergerawsample,
-                            [[],[]],
-                            [[],[]],
-                            [[],[]]
-                        )
-                        //
-                        //MODULE: SORTMERGEDRAWSAMPLE_SAMTOOLS
-                        //
-                        SORTMERGEDRAWSAMPLE_SAMTOOLS(
-                            MERGERAWSAMPLE_SAMTOOLS.out.bam.map{meta, bam -> 
-                                def new_meta = meta + [id:"${meta.id}.raw.sorted"]
-                                tuple(new_meta, bam)}.groupTuple(),
-                            [[],[]],
-                            Channel.value("bai")
-                        )
-                        // 
-                        // RAW_SAMPLES_FLAGSTAT
-                        //
+                            RAWFLAGSTAT(
+                              SORTMERGEDRAWSAMPLE_SAMTOOLS.out.bam.map{meta, bam -> tuple(meta, bam, [])} 
+                            )
 
-                        RAWFLAGSTAT(
-                          SORTMERGEDRAWSAMPLE_SAMTOOLS.out.bam.map{meta, bam -> tuple(meta, bam, [])} 
-                        )
-
-                        ch_raw_endorspy = RAWFLAGSTAT.out.flagstat.map{meta, stat ->
-                            def new_meta = [id:meta.id.replaceAll(".raw.sorted","")]
-                            tuple(new_meta, stat)
+                            ch_raw_endorspy = RAWFLAGSTAT.out.flagstat.map{meta, stat ->
+                                def new_meta = [id:meta.id.replaceAll(".raw.sorted","")]
+                                tuple(new_meta, stat)
+                            }
                         }
 
     ///first filter the aligned bam files for each library separately
@@ -228,40 +229,42 @@ workflow ASSEMBLE_MTDNA {
         [],
         Channel.value("bai")
     )
-                
-                        //
-                        //MODULE: MERGEFILTSAMPLE_SAMTOOLS
-                        //
-                        MERGEFILTSAMPLE_SAMTOOLS(
-                            SAMTOOLS_VIEW.out.bam.map{meta, bam -> 
-                                def new_meta = [id:meta.id.replaceAll(/\.${meta.lib}.*/,"")]
-                                tuple(new_meta, bam)
-                                }.groupTuple(),
-                            [[],[]],
-                            [[],[]],
-                            [[],[]]
-                        )
-                        //
-                        //MODULE: SORTMERGEDFILTSAMPLE_SAMTOOLS
-                        //
-                        SORTMERGEDFILTSAMPLE_SAMTOOLS(
-                            MERGEFILTSAMPLE_SAMTOOLS.out.bam.map{meta, bam -> 
-                                def new_meta = meta + [id:"${meta.id}.filt.sorted"]
-                                tuple(new_meta, bam)}.groupTuple(),
-                            [[],[]],
-                            Channel.value("bai")
-                        )
-                        // 
-                        //MODULE: FILTSAMPLEFLAGSTAT
-                        //
+                    
+                        if(params.mtdna_consense == false){
+                            //
+                            //MODULE: MERGEFILTSAMPLE_SAMTOOLS
+                            //
+                            MERGEFILTSAMPLE_SAMTOOLS(
+                                SAMTOOLS_VIEW.out.bam.map{meta, bam -> 
+                                    def new_meta = [id:meta.id.replaceAll(/\.${meta.lib}.*/,"")]
+                                    tuple(new_meta, bam)
+                                    }.groupTuple(),
+                                [[],[]],
+                                [[],[]],
+                                [[],[]]
+                            )
+                            //
+                            //MODULE: SORTMERGEDFILTSAMPLE_SAMTOOLS
+                            //
+                            SORTMERGEDFILTSAMPLE_SAMTOOLS(
+                                MERGEFILTSAMPLE_SAMTOOLS.out.bam.map{meta, bam -> 
+                                    def new_meta = meta + [id:"${meta.id}.filt.sorted"]
+                                    tuple(new_meta, bam)}.groupTuple(),
+                                [[],[]],
+                                Channel.value("bai")
+                            )
+                            // 
+                            //MODULE: FILTSAMPLEFLAGSTAT
+                            //
 
-                        FILTSAMPLEFLAGSTAT(
-                          SORTMERGEDFILTSAMPLE_SAMTOOLS.out.bam.map{meta, bam -> tuple(meta, bam, [])} 
-                        )
-                        
-                        ch_filt_endorspy = FILTSAMPLEFLAGSTAT.out.flagstat.map{meta, stat ->
-                            def new_meta = [id:meta.id.replaceAll(".filt.sorted","")]
-                            tuple(new_meta, stat)
+                            FILTSAMPLEFLAGSTAT(
+                              SORTMERGEDFILTSAMPLE_SAMTOOLS.out.bam.map{meta, bam -> tuple(meta, bam, [])} 
+                            )
+                            
+                            ch_filt_endorspy = FILTSAMPLEFLAGSTAT.out.flagstat.map{meta, stat ->
+                                def new_meta = [id:meta.id.replaceAll(".filt.sorted","")]
+                                tuple(new_meta, stat)
+                            }
                         }
 
 
@@ -360,26 +363,29 @@ workflow ASSEMBLE_MTDNA {
     // MODULE: DAMAGEPROFILER
     //
     //
-    DAMAGEPROFILER(
-        MERGEFILTDEDUPSAMPLE_SAMTOOLS.out.bam,
-        [],
-        [],
-        []
-    )
+    if(params.mtdna_consense == false){
+        DAMAGEPROFILER(
+            MERGEFILTDEDUPSAMPLE_SAMTOOLS.out.bam,
+            [],
+            [],
+            []
+        )
         ch_multiqc_files = ch_multiqc_files.mix(DAMAGEPROFILER.out.results.collect{it[1]})
-                    
-                        //
-                        //MODULE: FILTDEDUPSAMPLEFLAGSTAT
-                        //
+    }
+                    if(params.mtdna_consense == false){                
+                            //
+                            //MODULE: FILTDEDUPSAMPLEFLAGSTAT
+                            //
 
-                        FILTDEDUPSAMPLEFLAGSTAT(
-                          MERGEFILTDEDUPSAMPLE_SAMTOOLS.out.bam.map{meta, bam -> tuple(meta, bam, [])} 
-                        )
+                            FILTDEDUPSAMPLEFLAGSTAT(
+                              MERGEFILTDEDUPSAMPLE_SAMTOOLS.out.bam.map{meta, bam -> tuple(meta, bam, [])} 
+                            )
 
-                        ch_filt_dedup_endorspy = FILTDEDUPSAMPLEFLAGSTAT.out.flagstat.map{meta, stat ->
-                            def new_meta = [id:meta.id.replaceAll(".final.merged","")]
-                            tuple(new_meta, stat)
-                        }
+                            ch_filt_dedup_endorspy = FILTDEDUPSAMPLEFLAGSTAT.out.flagstat.map{meta, stat ->
+                                def new_meta = [id:meta.id.replaceAll(".final.merged","")]
+                                tuple(new_meta, stat)
+                            }
+                    }
     //
     //QUALIMAP_BAMQC
     //
@@ -416,240 +422,22 @@ workflow ASSEMBLE_MTDNA {
     //ch_raw_endorspy.view()
     //ch_filt_endorspy.view()
     //ch_filt_dedup_endorspy.view()
-    //
-    //MODULE: ENDORSPY
-    //
-    ENDORSPY(
-        ch_raw_endorspy.combine(ch_filt_endorspy, by:0).combine(ch_filt_dedup_endorspy,by:0)
-    )
-    
-    ch_multiqc_files = ch_multiqc_files.mix(ENDORSPY.out.json.collect{it[1]})
-    /////
-    /////
-    /////
-    /*
-    ch_combined_raw_bam =  SORTMERGEDLIB_SAMTOOLS.out.bam.map { meta, bam ->
-                def cleaned_id = meta.id.replaceFirst("\\.${meta.lib}\\.merged\\.sorted\$", "")
-                def new_meta =  meta + [ id: cleaned_id ]
-                tuple(new_meta, bam)
-            }
-
-
-    //br_grp_bwa_aln_out.singles.map{meta, bam -> tuple([id:meta.id],bam[0])}.view()
+    if(params.mtdna_consense == false){
+        //
+        //MODULE: ENDORSPY
+        //
+        ENDORSPY(
+            ch_raw_endorspy.combine(ch_filt_endorspy, by:0).combine(ch_filt_dedup_endorspy,by:0)
+        )
         
-    ///// this is exclusively to get the statistics of the raw bam files
+        ch_multiqc_files = ch_multiqc_files.mix(ENDORSPY.out.json.collect{it[1]})
+    }
     /////
     /////
-        ch_merge_raw_bams = ch_combined_raw_bam
-            .map { meta, bam -> 
-                tuple([id:meta.id], bam) 
-            }
-            .join(br_grp_bwa_aln_out.singles.map{ meta, bam ->
-                tuple([id:meta.id], bam[0])
-            }, remainder: true)
-            .map { it.findAll { it != null } } // This line removes the nulls
-
-        ch_merge_raw_bams = ch_merge_raw_bams.map { it ->
-            // it[0] is the meta map
-            // it[1..-1] is a list of all remaining elements (the BAMs)
-            [ it[0], it[1..-1] ]
-        }
-
-
-        ch_merge_raw_bams = ch_merge_raw_bams.branch { id, bams ->
-            to_merge: bams.size() > 1 
-            singles:  bams.size() == 1 
-            }
-
-            //
-            // MODULE: MERGE_RAW_BAMS_SAMPLE
-            //
-
-            MERGESAMPLE_SAMTOOLS(
-                ch_merge_raw_bams.to_merge.map{meta, bam -> 
-                    def new_meta = meta + [id:"${meta.id}.raw"]
-                    tuple(new_meta, bam)
-                    },
-                [[],[]],
-                [[],[]],
-                [[],[]]
-            )
-
-            //
-            // SORT_RAW_BAMS_SAMPLE
-            //
-
-            SORTMERGEDSAMPLE_SAMTOOLS(
-                MERGESAMPLE_SAMTOOLS.out.bam.map{meta, bam -> 
-                    def new_meta = meta + [id:"${meta.id}.sorted"]
-                    tuple(new_meta, bam)}.groupTuple(),
-                [[],[]],
-                Channel.value("bai")
-            )
-
-            ch_raw_sample_flagstat = SORTMERGEDSAMPLE_SAMTOOLS.out.bam.mix(ch_merge_raw_bams.singles)
-            
-            // 
-            // RAW_SAMPLES_FLAGSTAT
-            //
-
-            RAWFLAGSTAT(
-              ch_raw_sample_flagstat.map{meta, bam -> tuple(meta, bam, [])} 
-            )
-
-            //
-            // MODULE: FILTERED_FLAGSTAT
-            //
-            FILTEREDFLAGSTAT(
-                SAMTOOLS_VIEW.out.bam.map{meta, bam -> tuple(meta, bam, [])}
-            )
-
-            ///
-            /// MODULE: DEDUPFLAGSTAT
-            ///
-            DEDUPFLAGSTAT(
-                ch_dedup_flagstat.map{meta, bam -> tuple(meta, bam, [])}
-            )
-            
-            //
-            // MODULE: ENDORSPY
-            //
-            ENDORSPY(
-                RAWFLAGSTAT.out.flagstat.combine(FILTEREDFLAGSTAT.out.flagstat,by:0).combine(DEDUPFLAGSTAT.out.flagstat,by:0)
-            )
-            ch_multiqc_files = ch_multiqc_files.mix(ENDORSPY.out.json.collect{it[1]})
-
-            //
-            // MODULE: SAMTOOLS_DEPTH
-            //
-            SAMTOOLS_DEPTH(
-                ch_dedup_flagstat,
-                [[],[]]
-            )
-
-    
-    prepare_ch_dup = ch_combined_raw_bam.map{meta,bam -> tuple(meta, [bam])}.mix(br_grp_bwa_aln_out.singles)
-
-    prepare_ch_dup.collect().view()
-
-    //prepare_ch_dup.view()
-
-    prepare_ch_dup = prepare_ch_dup.branch{ meta, bam -> 
-                picard_b: meta.single_end == true
-                dedup_b: meta.single_end == false
-        }
-
-    //
-    // MODULE: PICARD_MARKDUPLICATES
-    //
-    PICARD_MARKDUPLICATES(
-        prepare_ch_dup.picard_b,
-        [[],[]],
-        [[],[]]
-    )
-    //
-    // MODULE: DEDUP
-    //
-    DEDUP(
-        prepare_ch_dup.dedup_b
-    )
-    
-        ///
-        /// MODULE: SORT_DEDUP
-        ///
-            SORT_DEDUP(
-                DEDUP.out.bam.map{meta, bam -> 
-                    def new_meta = meta + [id:"${meta.id}.sorted"]
-                    tuple(new_meta, bam)}.groupTuple(),
-                [[],[]],
-                Channel.value("bai")
-            )
-
-
-    // MODULE: BAMUTIL_TRIMBAM
-    //
-    //
-    ch_pre_bamtrim = PICARD_MARKDUPLICATES.out.bam.mix(SORT_DEDUP.out.bam).branch{meta, bam -> 
-                udg: meta.udg == true
-                non_udg: meta.udg == false
-        }
-
-    ch_bamtrim = ch_pre_bamtrim.non_udg.combine([params.trim_left]).combine([params.trim_right])
-
-    BAMUTIL_TRIMBAM(
-        ch_bamtrim
-    )
-
-    //
-    // MODULE: MERGE_SAMPLE
-    //
-    ch_merge_sample = BAMUTIL_TRIMBAM.out.bam.map{meta, bam -> tuple([id:meta.id], bam)}.mix(ch_pre_bamtrim.udg.map{meta, bam -> tuple([id:meta.id], bam)}).groupTuple()
-
-    ch_merge_sample = ch_merge_sample.branch{ meta, bams ->
-            to_merge: bams.size() > 1 
-            singles:  bams.size() == 1 
-            }
-
-    MERGE_SAMPLE(
-        ch_merge_sample.to_merge.map{meta, bam -> 
-            def new_meta = meta + [id:"${meta.id}.dedup"]
-            tuple(new_meta, bam)
-            },
-        [[],[]],
-        [[],[]],
-        [[],[]]
-    )
-
-    //
-    // MODULE: SORT_DEDUP_MERGED
-    //
-
-    SORT_DEDUP_MERGED(
-        MERGE_SAMPLE.out.bam.map{meta, bam -> 
-            def new_meta = meta + [id:"${meta.id}.sorted"]
-            tuple(new_meta, bam)}.groupTuple(),
-        [[],[]],
-        Channel.value("bai")
-    )
-
-    //
-    // DEDUP_FLAGSTAT
-    //
-    
-    ch_dedup_flagstat = SORT_DEDUP_MERGED.out.bam.mix(ch_merge_sample.singles)
-
-    SAMTOOLS_FLAGSTAT(
-        ch_dedup_flagstat.map{meta, bam-> tuple(meta, bam, [])}
-    )
-    
-    //
-    //MODULE: SAMTOOLS_VIEW
-    //
-    SAMTOOLS_VIEW(
-        ch_dedup_flagstat.map{meta, bam -> tuple(meta,bam,[])},
-        [[],[]],
-        [],
-        Channel.value("bai")
-    )
-
-    //
-    // MODULE: FILTERED_FLAGSTAT
-    //
-    FILTERED_FLAGSTAT(
-        SAMTOOLS_VIEW.out.bam.map{meta, bam -> tuple(meta, bam, [])}
-    )
-
-    //
-    // MODULE: ENDORSPY
-    //
-    RAW_SAMPLES_FLAGSTAT.out.flagstat.view()
-    SAMTOOLS_FLAGSTAT.out.flagstat.view()
-    FILTERED_FLAGSTAT.out.flagstat.view()
-
+    /////
 
     if(params.mtdna_consense == true ){
-        prech_realignsamfile = SAMTOOLS_SORT.out.bam.combine(fa)
-        //
+        prech_realignsamfile = MERGEFILTDEDUPSAMPLE_SAMTOOLS.out.bam.combine(fa)
         //
         //MODULE:CIRCULARMAPPER_REALIGNSAMFILE
         //
@@ -659,21 +447,7 @@ workflow ASSEMBLE_MTDNA {
             [[],params.circle_nbp],
             [[],[]]
         )
-        bam_to_dup = CIRCULARMAPPER_REALIGNSAMFILE.out.bam
-    }
-    else{
-            bam_to_dup = SAMTOOLS_SORT.out.bam
-        }
-    
-
-    
-
-
-    */
-
-
-    if(params.mtdna_consense == true ){
-        ch_angsd_docounts = SAMTOOLS_MERGE.out.bam.mix(singles)
+        ch_angsd_docounts = CIRCULARMAPPER_REALIGNSAMFILE.out.bam
         //
         // MODULE: ANGSD_DOCOUNTS
         //
@@ -689,7 +463,7 @@ workflow ASSEMBLE_MTDNA {
         //
         //QUALIMAP_BAMQC
         //
-        QUALIMAP_BAMQC(
+        MTDNA_BAMQC(
             ch_angsd_docounts,
             []
         )
