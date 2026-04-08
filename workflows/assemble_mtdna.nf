@@ -22,6 +22,8 @@ include { BAMUTIL_TRIMBAM        } from '../modules/nf-core/bamutil/trimbam/main
 include { SAMTOOLS_MERGE as MERGELIB_SAMTOOLS         } from '../modules/nf-core/samtools/merge/main'
 include { SAMTOOLS_MERGE as MERGERAWSAMPLE_SAMTOOLS         } from '../modules/nf-core/samtools/merge/main'
 include { SAMTOOLS_MERGE as MERGEFILTSAMPLE_SAMTOOLS         } from '../modules/nf-core/samtools/merge/main'
+include { PRESEQ_CCURVE          } from '../modules/nf-core/preseq/ccurve/main'
+include { PRESEQ_LCEXTRAP        } from '../modules/nf-core/preseq/lcextrap/main'
 include { SAMTOOLS_MERGE as MERGEFILTDEDUPSAMPLE_SAMTOOLS         } from '../modules/nf-core/samtools/merge/main'
 include { SAMTOOLS_DEPTH         } from '../modules/nf-core/samtools/depth/main'
 include { SAMTOOLS_SORT as SORTMERGEDLIB_SAMTOOLS          } from '../modules/nf-core/samtools/sort/main'
@@ -265,6 +267,17 @@ workflow ASSEMBLE_MTDNA {
                                 def new_meta = [id:meta.id.replaceAll(".filt.sorted","")]
                                 tuple(new_meta, stat)
                             }
+                            if(params.preseq == "extract"){
+                                    PRESEQ_LCEXTRAP(
+                                        SORTMERGEDFILTSAMPLE_SAMTOOLS.out.bam
+                                    )
+                                }
+
+                            if(params.preseq == "c_curve"){
+                                    PRESEQ_CCURVE(
+                                        SORTMERGEDFILTSAMPLE_SAMTOOLS.out.bam
+                                    )
+                                }
                         }
 
 
